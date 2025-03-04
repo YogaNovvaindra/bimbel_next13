@@ -1,73 +1,48 @@
-# FROM node:18-alpine3.16 AS builder
+# Use a minimal base image
+FROM node:lts-alpine AS builder
 
-# WORKDIR /app
-
-# COPY package.json package-lock.json ./
-# RUN npm install --frozen-lockfile
-# COPY . .
-# RUN npx prisma generate
-# RUN npm run build
-
-# FROM node:18-alpine3.16 AS runner
-# WORKDIR /app
-# COPY --from=builder /app/package.json .
-# COPY --from=builder /app/package-lock.json .
-# COPY --from=builder /app/next.config.js ./
-# COPY --from=builder /app/public ./public
-# COPY --from=builder /app/upload ./upload
-# COPY --from=builder /app/node_modules ./node_modules
-# COPY --from=builder /app/.next/ ./.next
-# COPY --from=builder /app/.env ./.env
-
-# ENV DATABASE_URL=mysql://root:abogoboga@10.1.1.13:3306/nextlinear
-# ENV NEXTAUTH_URL=http://localhost:3000
-# VOLUME ["/app/upload"]
-
-# EXPOSE 3000
-
-# ENTRYPOINT [ "npm", "run", "start" ]
-
-
-FROM node:lts-slim AS builder
-
+# Set working directory
 WORKDIR /app
 
+# Install dependencies separately for better caching
 COPY package.json package-lock.json ./
 RUN npm ci
-# RUN npm cache clean --force && \
-#     npm install -g npm@latest && \
-#     npm install
+
+# Copy application code
 COPY . .
+
+# Generate Prisma client
 RUN npx prisma generate
+
+# Build Next.js app as a standalone application
 RUN npm run build
 
-FROM node:lts-slim AS runner
+# Use a smaller base image for runtime
+FROM node:lts-alpine AS runner
 
-# Install additional dependencies
-
-# RUN apt-get update && apt-get install -y gnupg wget && \
-#     wget --quiet --output-document=- https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /etc/apt/trusted.gpg.d/google-archive.gpg && \
-#     echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | tee /etc/apt/sources.list.d/google.list && \
-#     apt-get update && apt-get install -y google-chrome-stable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf && \
-#     rm -rf /var/lib/apt/lists/*
-
-RUN apt-get update && apt-get install -y chromium fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf && \
-    rm -rf /var/lib/apt/lists/*
-
+# Set working directory
 WORKDIR /app
-COPY --from=builder /app/package.json .
-COPY --from=builder /app/package-lock.json .
-COPY --from=builder /app/next.config.js ./
+
+# Copy only necessary files from builder
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/package-lock.json ./
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/upload ./upload
-COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next/ ./.next
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.env ./.env
 
+# Copy standalone server files
+COPY --from=builder /app/.next/standalone ./
+
+# Expose environment variables
 ENV DATABASE_URL=mysql://root:abogoboga@10.1.1.13:3306/nextlinear
 ENV NEXTAUTH_URL=http://localhost:3000
+
+# Define upload volume
 VOLUME ["/app/upload"]
 
+# Expose application port
 EXPOSE 3000
 
-ENTRYPOINT [ "npm", "run", "start" ]
+# Start Next.js standalone server
+CMD ["node", "server.js"]
